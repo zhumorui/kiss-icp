@@ -82,7 +82,7 @@ class OdometryPipeline:
 
     # Public interface  ------
     def run(self):
-        self._run_pipeline()
+        yield from self._run_pipeline()
         self._run_evaluation()
         self._create_output_dir()
         self._write_result_poses()
@@ -91,8 +91,9 @@ class OdometryPipeline:
         self._write_log()
         return self.results
 
-    # Private interface  ------
     def _run_pipeline(self):
+        accumulated_point_cloud = np.empty((0, 3))  # 初始化累积点云
+
         for idx in get_progress_bar(self._first, self._last):
             raw_frame, timestamps = self._next(idx)
             start_time = time.perf_counter_ns()
@@ -100,6 +101,20 @@ class OdometryPipeline:
             self.poses.append(self.odometry.last_pose)
             self.times.append(time.perf_counter_ns() - start_time)
             self.visualizer.update(source, keypoints, self.odometry.local_map, self.poses[-1])
+
+            # 累积当前帧的点云数据
+            transformed_points = (self.odometry.last_pose[:3, :3] @ source.T).T + self.odometry.last_pose[:3, 3]
+            accumulated_point_cloud = np.vstack((accumulated_point_cloud, transformed_points))
+
+            yield {
+                'frame_idx': idx,
+                'pose': self.odometry.last_pose,
+                'time': self.times[-1],
+                'source': source,
+                'keypoints': keypoints,
+                'local_map': self.odometry.local_map,
+                'accumulated_point_cloud': accumulated_point_cloud  # 输出累积点云
+            }
 
     def _next(self, idx):
         """TODO: re-arrange this logic"""
